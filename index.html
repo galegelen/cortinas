@@ -303,8 +303,9 @@ select option { background:var(--surface); }
     <p>Sistema de seguimiento de tickets · Dashboard operativo</p>
   </div>
   <div class="header-right">
+    <button class="btn btn-sage" onclick="refreshFromSheets()" id="btn-refresh">↻ Actualizar desde Sheets</button>
     <button class="btn btn-lav" onclick="open_modal('modal-add')">✦ Agregar ticket</button>
-    <button class="btn btn-sage" onclick="open_modal('modal-import')">↑ Importar Excel</button>
+    <button class="btn btn-ghost" onclick="open_modal('modal-import')">↑ Importar Excel</button>
     <button class="btn btn-ghost" onclick="exportCSV()">↓ Exportar CSV</button>
     <button class="btn btn-blush" onclick="clearAll()">✕ Limpiar todo</button>
   </div>
@@ -979,6 +980,86 @@ function renderProvTable(prov, provTickets) {
           <td><span class="tag" style="background:${es.bg};color:${es.color};border:1px solid ${es.border}">${t.estado}</span></td>
         </tr>`;
       }).join('');
+}
+
+
+// ── REFRESH FROM SHEETS ──────────────────────────────────────────────────────
+const SHEET_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT6FXjJlRW4L7SeLP3v7SxsY75YWS0x-wAlhSmV0ez5Pm_ylDpuueSidpHzFOSY52U_zNVt7YV-eJZZ/pub?gid=424601211&single=true&output=csv';
+
+function parseCSV(text) {
+  const rows = []; let row = []; let cell = ''; let inQ = false;
+  for (let i=0; i<text.length; i++) {
+    const c = text[i];
+    if (c==='"') { if (inQ && text[i+1]==='"') { cell+='"'; i++; } else inQ=!inQ; }
+    else if (c===',' && !inQ) { row.push(cell); cell=''; }
+    else if ((c==='\n'||c==='\r') && !inQ) { if(c==='\r'&&text[i+1]==='\n')i++; row.push(cell); rows.push(row); row=[]; cell=''; }
+    else cell+=c;
+  }
+  if(cell||row.length){ row.push(cell); rows.push(row); }
+  return rows;
+}
+
+async function refreshFromSheets() {
+  const btn = document.getElementById('btn-refresh');
+  btn.textContent = '⏳ Cargando…';
+  btn.disabled = true;
+  try {
+    const resp = await fetch(SHEET_CSV + '&t=' + Date.now());
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const csv = await resp.text();
+    const rows = parseCSV(csv);
+    if (rows.length < 2) throw new Error('Sin datos');
+    const headers = rows[0].map(h => h.trim());
+    const norm = s => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+    const find = (obj, ...keys) => {
+      for (const k of keys) {
+        if (obj[k] !== undefined) return (obj[k]||'').toString().trim();
+        const match = headers.find(h => norm(h).includes(norm(k)));
+        if (match && obj[match] !== undefined) return (obj[match]||'').toString().trim();
+      }
+      return '';
+    };
+    const imported = rows.slice(1).filter(r=>r.some(c=>c)).map(row => {
+      const obj = {};
+      headers.forEach((h,i) => obj[h] = row[i]||'');
+      const t = {
+        tkt:    find(obj,'TKT','ticket').replace(/\.0$/,''),
+        tienda: find(obj,'Tienda','store').replace(/\.0$/,''),
+        averia: find(obj,'Avería','Averia','averia','categoria'),
+        fecha:  find(obj,'Fecha_Solicitud','Fecha','fecha'),
+        asunto: find(obj,'Asunto','asunto'),
+        entidad:find(obj,'Entidades externas','Entidades','entidad') || '-',
+        ppto1:  find(obj,'1 ppto','ppto1') || '-',
+        ppto2:  find(obj,'2 ppto','ppto2') || '-',
+        notas:  find(obj,'Notas','notas'),
+      };
+      // Calcular estado
+      const n = t.notas.toLowerCase(), a = t.asunto.toLowerCase();
+      const p1ok = t.ppto1 && t.ppto1!=='-' && t.ppto1!=='nan' && t.ppto1!=='';
+      const p2ok = t.ppto2 && t.ppto2!=='-' && t.ppto2!=='nan' && t.ppto2!=='';
+      if (/solucionado|rechazado/.test(n)) t.estado='Solucionado';
+      else if (/falta remito/.test(n)) t.estado='Falta Remito';
+      else if (/falta presupuesto/.test(n)||(/ppto/.test(a)&&!(p1ok||p2ok)&&!/solucionado/.test(n))) t.estado='Falta Presupuesto';
+      else if (p1ok||p2ok) t.estado='Con Presupuesto';
+      else if (/proceso|pendiente/.test(n)) t.estado='En Proceso';
+      else t.estado='Sin Definir';
+      return t;
+    }).filter(t => t.tkt);
+
+    // Mantener tickets locales que no estén en el Sheet
+    const sheetTkts = new Set(imported.map(t=>t.tkt));
+    const localOnly = tickets.filter(t => t._local && !sheetTkts.has(t.tkt));
+    tickets = [...imported, ...localOnly];
+    save();
+    render();
+    toast(`✅ ${imported.length} tickets actualizados desde Sheets`);
+    btn.textContent = '↻ Actualizar desde Sheets';
+    btn.disabled = false;
+  } catch(e) {
+    toast('❌ Error al conectar con Sheets. Revisá tu conexión.', true);
+    btn.textContent = '↻ Actualizar desde Sheets';
+    btn.disabled = false;
+  }
 }
 
 loadData();
