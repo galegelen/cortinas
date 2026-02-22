@@ -292,6 +292,9 @@ select option { background:var(--surface); }
 .epill.active { background: var(--sage); border-color: var(--sage); color: #fff; }
 .epill:hover:not(.active) { border-color: var(--sage); color: var(--sage-d); }
 
+
+
+
 </style>
 </head>
 <body>
@@ -315,6 +318,7 @@ select option { background:var(--surface); }
 <div class="tabs-nav">
   <button class="tab-btn active" onclick="switchTab('dashboard',this)">📊 Dashboard</button>
   <button class="tab-btn" onclick="switchTab('proveedores',this)">🏢 Proveedores</button>
+  <button class="tab-btn" onclick="switchTab('buscar',this)">🔍 Buscar tienda</button>
 </div>
 
 <!-- TAB DASHBOARD -->
@@ -444,6 +448,35 @@ select option { background:var(--surface); }
   </div>
 
 </div><!-- /tab-proveedores -->
+
+<!-- TAB BUSCAR TIENDA -->
+<div id="tab-buscar" style="display:none">
+  <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:2rem;max-width:500px;margin:0 auto;text-align:center;">
+    <div style="font-size:2rem;margin-bottom:.8rem;">🏪</div>
+    <div style="font-size:1.1rem;font-weight:700;color:var(--lav-d);margin-bottom:.4rem;">Buscar por tienda</div>
+    <div style="font-size:.78rem;color:var(--muted);margin-bottom:1.5rem;">Ingresá el número de tienda para ver todos sus tickets</div>
+    <div style="position:relative;margin-bottom:1rem;">
+      <span style="position:absolute;left:.9rem;top:50%;transform:translateY(-50%);font-size:1rem;pointer-events:none;">🔍</span>
+      <input id="s-tienda" placeholder="ej: 194, 5606, 1086…" oninput="buscarTienda()"
+        style="width:100%;padding:.7rem 1rem .7rem 2.5rem;border-radius:12px;border:2px solid var(--border);background:var(--bg);font-family:'DM Mono',monospace;font-size:1rem;color:var(--text);transition:border-color .2s;text-align:center;letter-spacing:.05em;"
+        onfocus="this.style.borderColor='var(--lav)'" onblur="this.style.borderColor='var(--border)'">
+    </div>
+    <div id="buscar-result" style="font-size:.75rem;color:var(--muted);min-height:1.2rem;font-family:'DM Mono',monospace;"></div>
+  </div>
+  <div class="table-section" id="buscar-table" style="margin-top:1rem;display:none">
+    <div class="table-header">
+      <div class="table-title" id="buscar-count">—</div>
+    </div>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr>
+          <th>TKT</th><th>Avería</th><th>Fecha</th><th>Entidad</th><th>PPTO 1</th><th>PPTO 2</th><th>Notas</th><th>Estado</th>
+        </tr></thead>
+        <tbody id="buscar-body"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
 
 </div><!-- /container -->
 
@@ -867,7 +900,9 @@ function switchTab(tab, btn) {
   btn.classList.add('active');
   document.getElementById('tab-dashboard').style.display   = tab === 'dashboard'   ? '' : 'none';
   document.getElementById('tab-proveedores').style.display = tab === 'proveedores' ? '' : 'none';
+  document.getElementById('tab-buscar').style.display      = tab === 'buscar'      ? '' : 'none';
   if (tab === 'proveedores') renderProveedores();
+  if (tab === 'buscar') setTimeout(()=>document.getElementById('s-tienda').focus(), 100);
 }
 
 // ── PROVEEDORES ──────────────────────────────────────────────────────────────
@@ -983,6 +1018,7 @@ function renderProvTable(prov, provTickets) {
 }
 
 
+
 // ── REFRESH FROM SHEETS ──────────────────────────────────────────────────────
 const SHEET_CSV = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vT6FXjJlRW4L7SeLP3v7SxsY75YWS0x-wAlhSmV0ez5Pm_ylDpuueSidpHzFOSY52U_zNVt7YV-eJZZ/pub?gid=424601211&single=true&output=csv';
 
@@ -1062,6 +1098,46 @@ async function refreshFromSheets() {
   }
 }
 
+
+// ── BUSCAR TIENDA ─────────────────────────────────────────────────────────────
+function buscarTienda() {
+  const val = document.getElementById('s-tienda').value.trim();
+  const result = document.getElementById('buscar-result');
+  const tbl = document.getElementById('buscar-table');
+  const tbody = document.getElementById('buscar-body');
+  const count = document.getElementById('buscar-count');
+
+  if (!val) { result.textContent = ''; tbl.style.display='none'; return; }
+
+  const found = tickets.filter(t => String(t.tienda).includes(val));
+
+  if (!found.length) {
+    result.textContent = 'No se encontraron tickets para esa tienda';
+    tbl.style.display = 'none';
+    return;
+  }
+
+  result.textContent = '';
+  tbl.style.display = 'block';
+  count.textContent = `${found.length} ticket${found.length!==1?'s':''} · Tienda ${val}`;
+
+  const s = ESTADO_STYLES;
+  tbody.innerHTML = found.map(t => {
+    const es = s[t.estado] || {bg:'#F5F5F8', color:'#505068', border:'#AAAACC'};
+    return `<tr>
+      <td class="td-tkt"><a href="https://dia.cloud.invgate.net/requests/show/index/id/${t.tkt}" target="_blank" style="color:var(--lav-d);font-weight:700;font-family:'DM Mono',monospace;text-decoration:none" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">#${t.tkt}</a></td>
+      <td style="font-size:.68rem;color:var(--muted);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${t.averia}">${t.averia}</td>
+      <td style="color:var(--muted);white-space:nowrap;font-size:.68rem">${t.fecha}</td>
+      <td style="font-size:.7rem">${t.entidad}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:.68rem;color:var(--sage-d)">${t.ppto1||'-'}</td>
+      <td style="font-family:'DM Mono',monospace;font-size:.68rem;color:var(--sage-d)">${t.ppto2||'-'}</td>
+      <td style="font-size:.68rem;color:var(--muted)">${t.notas||'-'}</td>
+      <td><span class="tag" style="background:${es.bg};color:${es.color};border:1px solid ${es.border}">${t.estado}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+function applyFilters(){renderTable();}
 loadData();
 render();
 </script>
